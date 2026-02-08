@@ -7,8 +7,191 @@ on:
     branches: [main, master]
 
 jobs:
+  integrity-check:
+    name: 🔒 Template Integrity Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed to compare against initial commit
+
+      - name: Verify protected files unchanged
+        id: integrity
+        run: |
+          echo "## 🔒 Template Integrity Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          INTEGRITY_OK=true
+
+          # ─────────────────────────────────────────────
+          # Layer 1: SHA-256 checksum verification
+          # ─────────────────────────────────────────────
+          # These checksums are generated at template creation time.
+          # To regenerate, run from the template repo root:
+          #   sha256sum vitest.config.ts tsconfig.json src/setupTests.ts
+          #
+          # ⚠️  INSTRUCTOR: Replace these placeholder values with actual checksums
+          #     before distributing the template. See INSTRUCTOR_SETUP.md for details.
+          # ─────────────────────────────────────────────
+
+          echo "### Checksum Verification (SHA-256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          declare -A EXPECTED_CHECKSUMS
+          EXPECTED_CHECKSUMS=(
+            ["vitest.config.ts"]="REPLACE_WITH_ACTUAL_CHECKSUM"
+            ["tsconfig.json"]="REPLACE_WITH_ACTUAL_CHECKSUM"
+            ["src/setupTests.ts"]="REPLACE_WITH_ACTUAL_CHECKSUM"
+          )
+
+          CHECKSUM_FAILURES=""
+
+          for file in "${!EXPECTED_CHECKSUMS[@]}"; do
+            expected="${EXPECTED_CHECKSUMS[$file]}"
+
+            if [ ! -f "$file" ]; then
+              echo "❌ \`$file\` — **MISSING** (deleted from template)" >> $GITHUB_STEP_SUMMARY
+              CHECKSUM_FAILURES="$CHECKSUM_FAILURES $file"
+              INTEGRITY_OK=false
+              continue
+            fi
+
+            actual=$(sha256sum "$file" | awk '{print $1}')
+
+            if [ "$expected" = "REPLACE_WITH_ACTUAL_CHECKSUM" ]; then
+              echo "⚠️ \`$file\` — checksum not configured (instructor action needed)" >> $GITHUB_STEP_SUMMARY
+            elif [ "$actual" = "$expected" ]; then
+              echo "✅ \`$file\` — checksum matches" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ \`$file\` — **MODIFIED** (checksum mismatch)" >> $GITHUB_STEP_SUMMARY
+              echo "    Expected: \`${expected:0:16}…\`" >> $GITHUB_STEP_SUMMARY
+              echo "    Actual:   \`${actual:0:16}…\`" >> $GITHUB_STEP_SUMMARY
+              CHECKSUM_FAILURES="$CHECKSUM_FAILURES $file"
+              INTEGRITY_OK=false
+            fi
+          done
+
+          # ─────────────────────────────────────────────
+          # Layer 2: Git history comparison
+          # ─────────────────────────────────────────────
+          # Compare protected files against the initial (root) commit.
+          # GitHub Classroom repos preserve the template's commit history,
+          # so the root commit always contains the original template files.
+          # ─────────────────────────────────────────────
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Git History Comparison" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get the root commit (first commit in the repo — the template)
+          ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD | head -1)
+          echo "Template commit: \`${ROOT_COMMIT:0:8}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          PROTECTED_FILES=(
+            "vitest.config.ts"
+            "tsconfig.json"
+            "src/setupTests.ts"
+          )
+
+          GIT_DIFF_FAILURES=""
+
+          for file in "${PROTECTED_FILES[@]}"; do
+            if ! git show "${ROOT_COMMIT}:${file}" &>/dev/null; then
+              echo "⚠️ \`$file\` — not found in template commit (skipping diff)" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            if git diff --quiet "$ROOT_COMMIT" -- "$file" 2>/dev/null; then
+              echo "✅ \`$file\` — unchanged from template" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ \`$file\` — **MODIFIED** since template commit" >> $GITHUB_STEP_SUMMARY
+              CHANGED_LINES=$(git diff "$ROOT_COMMIT" -- "$file" | grep -c '^[+-]' || echo "0")
+              echo "    ($CHANGED_LINES lines changed)" >> $GITHUB_STEP_SUMMARY
+              GIT_DIFF_FAILURES="$GIT_DIFF_FAILURES $file"
+              INTEGRITY_OK=false
+            fi
+          done
+
+          # ─────────────────────────────────────────────
+          # Layer 3: Coverage threshold verification
+          # ─────────────────────────────────────────────
+          # Even if the full checksum check isn't configured yet,
+          # specifically verify that coverage thresholds haven't been lowered.
+          # ─────────────────────────────────────────────
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Coverage Threshold Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "vitest.config.ts" ]; then
+            STMT_THRESHOLD=$(grep -oP 'statements:\s*\K\d+' vitest.config.ts || echo "0")
+            BRANCH_THRESHOLD=$(grep -oP 'branches:\s*\K\d+' vitest.config.ts || echo "0")
+            FUNC_THRESHOLD=$(grep -oP 'functions:\s*\K\d+' vitest.config.ts || echo "0")
+            LINE_THRESHOLD=$(grep -oP 'lines:\s*\K\d+' vitest.config.ts || echo "0")
+
+            REQUIRED_THRESHOLD=90
+            THRESHOLD_OK=true
+
+            echo "| Metric | Threshold | Required | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-----------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            for metric in "statements:$STMT_THRESHOLD" "branches:$BRANCH_THRESHOLD" "functions:$FUNC_THRESHOLD" "lines:$LINE_THRESHOLD"; do
+              name="${metric%%:*}"
+              value="${metric##*:}"
+
+              if [ "$value" -ge "$REQUIRED_THRESHOLD" ] 2>/dev/null; then
+                echo "| $name | ${value}% | ${REQUIRED_THRESHOLD}% | ✅ |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| $name | ${value}% | ${REQUIRED_THRESHOLD}% | ❌ **Lowered** |" >> $GITHUB_STEP_SUMMARY
+                THRESHOLD_OK=false
+                INTEGRITY_OK=false
+              fi
+            done
+
+            if [ "$THRESHOLD_OK" = "true" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "✅ **All coverage thresholds at or above ${REQUIRED_THRESHOLD}%**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "❌ **Coverage thresholds have been lowered below ${REQUIRED_THRESHOLD}%**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ \`vitest.config.ts\` is missing — cannot verify thresholds" >> $GITHUB_STEP_SUMMARY
+            INTEGRITY_OK=false
+          fi
+
+          # ─────────────────────────────────────────────
+          # Summary
+          # ─────────────────────────────────────────────
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$INTEGRITY_OK" = "true" ]; then
+            echo "### ✅ Integrity check passed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All template-provided configuration files are unmodified." >> $GITHUB_STEP_SUMMARY
+            echo "integrity_ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ❌ Integrity check failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "One or more template-provided files have been modified." >> $GITHUB_STEP_SUMMARY
+            echo "These files should not be changed: \`vitest.config.ts\`, \`tsconfig.json\`, \`setupTests.ts\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Restore the original files from the template or contact your instructor.**" >> $GITHUB_STEP_SUMMARY
+            echo "integrity_ok=false" >> $GITHUB_OUTPUT
+
+            # Fail the job so the status is visible on the dashboard
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
+    needs: integrity-check
+    if: always()  # Run even if integrity check fails — students still need test feedback
 
     steps:
       - name: Checkout code
@@ -38,7 +221,8 @@ jobs:
 
   grading-checks:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [integrity-check, test]
+    if: always()  # Run even if upstream jobs fail — grading summary is always useful
 
     steps:
       - name: Checkout code
@@ -365,10 +549,23 @@ jobs:
           echo "| Criteria | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
 
+          # Integrity check result (from upstream job)
+          if [ "${{ needs.integrity-check.result }}" = "success" ]; then
+            echo "| 🔒 Template Integrity | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🔒 Template Integrity | ❌ **Protected files modified** |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           if [ "${{ steps.files.outputs.files_missing }}" = "false" ]; then
             echo "| Required Files | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Required Files | ❌ Missing files |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.test.result }}" = "success" ]; then
+            echo "| Tests & TypeScript | ✅ Pass |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Tests & TypeScript | ❌ Failures |" >> $GITHUB_STEP_SUMMARY
           fi
 
           if [ "${{ steps.test_count.outputs.test_count_met }}" = "true" ]; then
