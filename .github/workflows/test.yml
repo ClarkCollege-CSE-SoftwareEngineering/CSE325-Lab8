@@ -15,7 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed to compare against initial commit
+          fetch-depth: 0 # Full history needed to compare against initial commit
 
       - name: Verify protected files unchanged
         id: integrity
@@ -41,9 +41,9 @@ jobs:
 
           declare -A EXPECTED_CHECKSUMS
           EXPECTED_CHECKSUMS=(
-            ["vitest.config.ts"]="REPLACE_WITH_ACTUAL_CHECKSUM"
-            ["tsconfig.json"]="REPLACE_WITH_ACTUAL_CHECKSUM"
-            ["src/setupTests.ts"]="REPLACE_WITH_ACTUAL_CHECKSUM"
+            ["vitest.config.ts"]="5d5e8122b6f194ca1a24941a5d733c828f4d8cbe51e6f92680139686d3f2cc01"
+            ["tsconfig.json"]="3e8d1142c6e1c174caf48da033978653fd14bf3e8b34683d08331c8e3e027826"
+            ["src/setupTests.ts"]="a46d66851af2c056e805fdd574bf5ec3adb1181c43c5e41f0a1c592e338afe64"
           )
 
           CHECKSUM_FAILURES=""
@@ -191,7 +191,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     needs: integrity-check
-    if: always()  # Run even if integrity check fails — students still need test feedback
+    if: always() # Run even if integrity check fails — students still need test feedback
 
     steps:
       - name: Checkout code
@@ -200,8 +200,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -222,7 +222,7 @@ jobs:
   grading-checks:
     runs-on: ubuntu-latest
     needs: [integrity-check, test]
-    if: always()  # Run even if upstream jobs fail — grading summary is always useful
+    if: always() # Run even if upstream jobs fail — grading summary is always useful
 
     steps:
       - name: Checkout code
@@ -231,8 +231,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
